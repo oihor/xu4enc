@@ -1,63 +1,39 @@
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/ioctl.h>
-#include <getopt.h>
 
-#include <exception>
-#include <vector>
-#include <queue>
-#include <cstring>
+#include "M2M.h"
 
-#include <linux/videodev2.h> // V4L
-#include <sys/mman.h>	// mmap
-#include <stdint.h>
+ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
+    // get buffer
+    ssize_t totalRead = 0;
+    while (totalRead < nbytes)
+    {
+        ssize_t readCount = read(fd, (char*)(buf) + totalRead, nbytes - totalRead);
+        if (readCount <= 0)
+        {
+            //throw Exception("read failed.");
 
+            // End of stream?
+            fprintf(stderr, "read_file_to_buf read failed. (%d)\n", readCount);
 
-class Exception : public std::exception
-{
-public:
-	Exception(const char* message)
-		: std::exception()
-	{
-		fprintf(stderr, "%s\n", message);
-	}
+            // TODO: Signal codec and flush
+            break;
+        }
+        else
+        {
+            totalRead += readCount;
+        }
+    }
 
-};
+    if (totalRead < nbytes)
+    {
+        fprintf(stderr, "read_file_to_buf read underflow. (%d of %d)\n", totalRead, nbytes);
+    }
 
-
-struct BufferMapping
-{
-	void* Start0;
-	size_t Length0;
-	void* Start1;
-	size_t Length1;
-};
+    return totalRead;
+}
 
 
-class M2M
-{
-	static const int BUFFER_COUNT = 4;
 
-	//[    2.236569] s5p-mfc 11000000.codec:: decoder registered as /dev/video10
-	//[    2.305343] s5p-mfc 11000000.codec:: encoder registered as /dev/video11
-	const char* decoderName = "/dev/video11";
-	
-	int mfc_fd;
-	int width;
-	int height;
-	int fps;
-	int bitrate;
-	int gop;
-
-	std::vector<BufferMapping> inputBuffers;
-	std::vector<BufferMapping> outputBuffers;
-	bool streamActive = false;
-	std::queue<int> freeInputBuffers;
-
-
-	void SetProfile()
+	void M2M::SetProfile()
 	{
 		//V4L2_CID_MPEG_VIDEO_H264_PROFILE = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH
 		//V4L2_CID_MPEG_VIDEO_H264_LEVEL = V4L2_MPEG_VIDEO_H264_LEVEL_4_0
@@ -84,7 +60,7 @@ class M2M
 
 	}
 
-	void SetBitrate(int value)
+	void M2M::SetBitrate(int value)
 	{
 		v4l2_ext_control ctrl[2] = { 0 };
 		ctrl[0].id = V4L2_CID_MPEG_VIDEO_BITRATE;
@@ -105,7 +81,7 @@ class M2M
 		}
 	}
 
-	void SetGroupOfPictures(int value)
+	void M2M::SetGroupOfPictures(int value)
 	{
 		v4l2_ext_control ctrl = { 0 };
 		ctrl.id = V4L2_CID_MPEG_VIDEO_GOP_SIZE;
@@ -123,7 +99,7 @@ class M2M
 		}
 	}
 
-	void ApplyInputSettings()
+	void M2M::ApplyInputSettings()
 	{
 		// Apply capture settings
 		v4l2_format format = { 0 };
@@ -132,6 +108,11 @@ class M2M
 		format.fmt.pix_mp.height = height;
 		format.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12M;
 		format.fmt.pix_mp.num_planes = 2;
+		//format.fmt.pix_mp.plane_fmt[0].sizeimage = width * height;
+		//format.fmt.pix_mp.plane_fmt[1].sizeimage = width * height / 2;
+
+		fprintf(stderr, "v4l2_format in about to set: width=%d, height=%d, pixelformat=0x%x\n",
+			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);
 
 		int io = ioctl(mfc_fd, VIDIOC_S_FMT, &format);
 		if (io < 0)
@@ -139,7 +120,7 @@ class M2M
 			throw Exception("VIDIOC_S_FMT failed.");
 		}
 
-		fprintf(stderr, "v4l2_format: width=%d, height=%d, pixelformat=0x%x\n",
+		fprintf(stderr, "v4l2_format in has been set: width=%d, height=%d, pixelformat=0x%x\n",
 			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);
 
 
@@ -166,21 +147,21 @@ class M2M
 		SetGroupOfPictures(gop);
 	}
 
-	void CreateInputBuffers()
+	void M2M::CreateInputBuffers()
 	{
 		// Request buffers
 		v4l2_requestbuffers requestBuffers = { 0 };
-		requestBuffers.count = BUFFER_COUNT;
+		requestBuffers.count = OUTPUT_BUFFER_COUNT;
 		requestBuffers.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
 		requestBuffers.memory = V4L2_MEMORY_MMAP;
 
 		int io = ioctl(mfc_fd, VIDIOC_REQBUFS, &requestBuffers);
 		if (io < 0)
 		{
-			throw Exception("VIDIOC_REQBUFS failed.");
+			throw Exception("OUTPUT VIDIOC_REQBUFS failed.");
 		}
 
-		if (requestBuffers.count > BUFFER_COUNT)
+		if (requestBuffers.count > OUTPUT_BUFFER_COUNT)
 		{
 			throw Exception("too many buffers.");
 		}
@@ -233,6 +214,8 @@ class M2M
 				throw Exception("mmap 1 failed.");
 			}
 
+			fprintf(stderr, "Adding buffer %d Length0 %zx Start0 %p Length1 %zx Start1 %p \n", i, mapping.Length0, mapping.Start0, mapping.Length1, mapping.Start1);
+
 			inputBuffers.push_back(mapping);
 			freeInputBuffers.push(i);
 
@@ -249,7 +232,7 @@ class M2M
 		}
 	}
 
-	void ApplyOutputSettings()
+	void M2M::ApplyOutputSettings()
 	{
 		// Apply capture settings
 		v4l2_format format = { 0 };
@@ -259,32 +242,35 @@ class M2M
 		format.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_H264;
 		format.fmt.pix_mp.plane_fmt[0].sizeimage = width * height * 4;
 
+		fprintf(stderr, "v4l2_format out about to set: width=%d, height=%d, pixelformat=0x%x\n",
+			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);
+
 		int io = ioctl(mfc_fd, VIDIOC_S_FMT, &format);
 		if (io < 0)
 		{
 			throw Exception("VIDIOC_S_FMT failed.");
 		}
 
-		fprintf(stderr, "v4l2_format: width=%d, height=%d, pixelformat=0x%x\n",
+		fprintf(stderr, "v4l2_format out has been set: width=%d, height=%d, pixelformat=0x%x\n",
 			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);
 
 	}
 
-	void CreateOutputBuffers()
+	void M2M::CreateOutputBuffers()
 	{
 		// Request buffers
 		v4l2_requestbuffers requestBuffers = { 0 };
-		requestBuffers.count = BUFFER_COUNT;
+		requestBuffers.count = CAPTURE_BUFFER_COUNT;
 		requestBuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 		requestBuffers.memory = V4L2_MEMORY_MMAP;
 
 		int io = ioctl(mfc_fd, VIDIOC_REQBUFS, &requestBuffers);
 		if (io < 0)
 		{
-			throw Exception("VIDIOC_REQBUFS failed.");
+			throw Exception("CAPTURE VIDIOC_REQBUFS failed.");
 		}
 
-		if (requestBuffers.count > BUFFER_COUNT)
+		if (requestBuffers.count > CAPTURE_BUFFER_COUNT)
 		{
 			throw Exception("too many buffers.");
 		}
@@ -348,7 +334,7 @@ class M2M
 		}
 	}
 
-	void EnumFormats(uint32_t v4l2BufType)
+	void M2M::EnumFormats(uint32_t v4l2BufType)
 	{
 		int io;
 
@@ -361,7 +347,7 @@ class M2M
 			io = ioctl(mfc_fd, VIDIOC_ENUM_FMT, &formatDesc);
 			if (io < 0)
 			{
-				//printf("VIDIOC_ENUM_FMT failed.\n");
+				//fprintf(stderr, "VIDIOC_ENUM_FMT failed.\n");
 				break;
 			}
 
@@ -376,7 +362,7 @@ class M2M
 				io = ioctl(mfc_fd, VIDIOC_ENUM_FRAMESIZES, &formatSize);
 				if (io < 0)
 				{
-					//printf("VIDIOC_ENUM_FRAMESIZES failed.\n");
+					//fprintf(stderr, "VIDIOC_ENUM_FRAMESIZES failed.\n");
 					break;
 				}
 
@@ -393,7 +379,7 @@ class M2M
 					io = ioctl(mfc_fd, VIDIOC_ENUM_FRAMEINTERVALS, &frameInterval);
 					if (io < 0)
 					{
-						//printf("VIDIOC_ENUM_FRAMEINTERVALS failed.\n");
+						//fprintf(stderr, "VIDIOC_ENUM_FRAMEINTERVALS failed.\n");
 						break;
 					}
 
@@ -409,10 +395,7 @@ class M2M
 		}
 	}
 
-
-public:
-
-	M2M(int width, int height, int fps, int bitrate, int gop)
+	M2M::M2M(int width, int height, int fps, int bitrate, int gop)
 		: width(width), height(height), fps(fps), bitrate(bitrate), gop(gop)
 	{
 		// O_NONBLOCK prevents deque operations from blocking if no buffers are ready
@@ -435,8 +418,8 @@ public:
 		if ((cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) == 0 ||
 			(cap.capabilities & V4L2_CAP_STREAMING) == 0)
 		{
-			printf("V4L2_CAP_VIDEO_M2M_MPLANE=%d\n", (cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) != 0);
-			printf("V4L2_CAP_STREAMING=%d\n", (cap.capabilities & V4L2_CAP_STREAMING) != 0);
+			fprintf(stderr, "V4L2_CAP_VIDEO_M2M_MPLANE=%d\n", (cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) != 0);
+			fprintf(stderr, "V4L2_CAP_STREAMING=%d\n", (cap.capabilities & V4L2_CAP_STREAMING) != 0);
 
 			throw Exception("Insufficient capabilities of MFC device.");
 		}
@@ -498,7 +481,7 @@ public:
 		}
 	}
 
-	~M2M()
+	M2M::~M2M()
 	{
 		// Stop output stream
 		int val = (int)V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -523,7 +506,7 @@ public:
 	}
 
 
-	bool EncodeNV12(const unsigned char* y, const unsigned char* uv)
+	bool M2M::EncodeNV12(const unsigned char* y, const unsigned char* uv)
 	{
 		bool result;
 
@@ -536,25 +519,31 @@ public:
 		dqbuf.m.planes = planes;
 		dqbuf.length = 2;
 
-		int ret = ioctl(mfc_fd, VIDIOC_DQBUF, &dqbuf);
-		if (ret != 0)
-		{
-			printf("Waiting on V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE buffer.\n");
-		}
-		else
-		{
-			freeInputBuffers.push(dqbuf.index);
-		}
-		
+		int ret = 0;
+//		if(freeInputBuffers.empty()) {
+//	        while(ret == 0) {
+	            ret = ioctl(mfc_fd, VIDIOC_DQBUF, &dqbuf);
+	            if (ret != 0)
+	            {
+	                //fprintf(stderr, "Waiting on V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE buffer.\n");
+	            }
+	            else
+	            {
+	                freeInputBuffers.push(dqbuf.index);
+	            }
+//	        }
+//		}
 
 		// Encode
 		if (freeInputBuffers.empty())
 		{
-			printf("no free buffers.\n");
+			waitingOutputMPlane = true;
+			//fprintf(stderr, "no free buffers.\n");
 			result = false;
 		}
 		else
 		{
+			waitingOutputMPlane = false;
 			result = true;
 			
 			int index = freeInputBuffers.front();
@@ -581,9 +570,13 @@ public:
 			BufferMapping mapping = inputBuffers[buffer.index];
 			
 			memcpy(mapping.Start0, y, width * height);
+			//read_file_to_buf(STDIN_FILENO, mapping.Start0, width * height);
+			//memset(mapping.Start0, 0x00, width * height);
 			buffer.m.planes[0].bytesused = width * height;
 
 			memcpy(mapping.Start1, uv, width * height / 2);
+			//read_file_to_buf(STDIN_FILENO, mapping.Start1, width * height / 2);
+			//memset(mapping.Start1, 0x00, width * height / 2);
 			buffer.m.planes[1].bytesused = width * height / 2;
 			
 
@@ -613,7 +606,7 @@ public:
 	}
 
 
-	int GetEncodedData(void* dataOut)
+	int M2M::GetEncodedData(void* dataOut)
 	{
 		int result;
 
@@ -630,11 +623,13 @@ public:
 		int ret = ioctl(mfc_fd, VIDIOC_DQBUF, &buffer);
 		if (ret != 0)
 		{
-			printf("Waiting on V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE buffer.\n");
+			//fprintf(stderr, "Waiting on V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE buffer.\n");
+			waitingCaptureMPlane = true;
 			result = 0;
 		}
 		else
 		{
+			waitingCaptureMPlane = false;
 			result = buffer.m.planes[0].bytesused;
 
 			// Copy data
@@ -654,5 +649,3 @@ public:
 		return result;
 	}
 
-
-};

@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <chrono>
 
 #include <linux/videodev2.h> // V4L
 #include <sys/mman.h>	// mmap
@@ -17,7 +18,7 @@
 #include "M2M.h"
 
 
-const int DEFAULT_BITRATE = 1000000 * 5;
+const int DEFAULT_BITRATE = 1000000 * 6;
 
 
 struct option longopts[] = {
@@ -88,6 +89,7 @@ int main(int argc, char** argv)
 
 	M2M codec(width, height, framerate, bitrate, gop);
 	
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
 	// Start streaming
 	int frameCount = 0;
@@ -101,7 +103,10 @@ int main(int argc, char** argv)
 	const int outputBufferSize = width * height * 4;
 	char* outputBuffer = new char[outputBufferSize];
 
-	while (true)
+	auto start = std::chrono::high_resolution_clock::now();
+	auto end = start;
+
+	while (true /*&& (frameCount < framerate * 1)*/)
 	{
 		// get buffer
 		ssize_t totalRead = 0;
@@ -131,44 +136,66 @@ int main(int argc, char** argv)
 		}
 
 
-		// Encode the video frames
-		while (!codec.EncodeNV12(&input[0], &input[width * height]))
-		{
-			fprintf(stderr, "codec.EncodeN12 failed.\n");
-			std::this_thread::yield();
+		bool frameEncoded = false;
+		while(!frameEncoded) {
+	        // Encode the video frames
+	        while (!codec.EncodeNV12(&input[0], &input[width * height]))
+	        {
+	            //fprintf(stderr, "codec.EncodeN12 failed.\n");
+	            std::this_thread::yield();
+	            //std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	            //std::this_thread::sleep_for(std::chrono::milliseconds(1000 / (8 * framerate)));
+	        } //else {
+	            frameEncoded = true;
+	        //}
+
+	        while (true)
+	        {
+	            int outCnt = codec.GetEncodedData(&outputBuffer[0]);
+	            if (outCnt <= 0)
+	            {
+	                break;
+	            }
+
+	            size_t offset = 0;
+	            while (offset < outCnt)
+	            {
+	                ssize_t writeCount = write(STDOUT_FILENO, &outputBuffer[0] + offset, outCnt - offset);
+	                //ssize_t writeCount = outCnt;
+	                if (writeCount < 0)
+	                {
+	                    throw Exception("write failed.");
+	                }
+	                else
+	                {
+	                    offset += writeCount;
+	                }
+	            }
+	        }
+
+	        // Stats
+	        if(frameEncoded) {
+	            if (frameCount != 0 && (frameCount % 100) == 0)
+	            {
+	                end = std::chrono::high_resolution_clock::now();
+	                std::chrono::milliseconds diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+	                start = end;
+	                fprintf(stderr, "frameCount=%d fps=%f.\n", frameCount, (double(100)/double(diff.count())*1000));
+	            }
+
+	            ++frameCount;
+	        }
+
+//	        if(codec.isWaitingOutputMPlane() && codec.isWaitingCaptureMPlane()) {
+//	            //fprintf(stderr, "sleeping for %d ms.\n", 1000 / (8 * framerate));
+//	            //std::this_thread::sleep_for(std::chrono::milliseconds(1000 / (8 * framerate)));
+//	            std::this_thread::yield();
+//	            //std::this_thread::sleep_for(std::chrono::milliseconds(1));
+//	        }
 		}
-
-		while (true)
-		{
-			int outCnt = codec.GetEncodedData(&outputBuffer[0]);
-			if (outCnt <= 0)
-			{
-				break;
-			}
-
-			size_t offset = 0;
-			while (offset < outCnt)
-			{
-				ssize_t writeCount = write(STDOUT_FILENO, &outputBuffer[0] + offset, outCnt - offset);
-				if (writeCount < 0)
-				{
-					throw Exception("write failed.");
-				}
-				else
-				{
-					offset += writeCount;
-				}
-			}
-		}
-
-		// Stats
-		if ((frameCount % 100) == 0)
-		{
-			fprintf(stderr, "frameCount=%d.\n", frameCount);
-		}
-
-		++frameCount;
 	}
+
+	fprintf(stderr, "frameCount=%d.\n", frameCount);
 
 	return 0;
 
