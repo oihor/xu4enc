@@ -40,8 +40,9 @@ struct BufferMapping
 
 class M2M
 {
-	static const int OUTPUT_BUFFER_COUNT = 8;
-	static const int CAPTURE_BUFFER_COUNT = 32;
+	static const int OUTPUT_BUFFER_COUNT = 2;
+	static const int CAPTURE_BUFFER_COUNT = 2;
+	static const int VIDEO_ENCODER_POLL_TIMEOUT = 25; // ms
 
 	//[    2.236569] s5p-mfc 11000000.codec:: decoder registered as /dev/video10
 	//[    2.305343] s5p-mfc 11000000.codec:: encoder registered as /dev/video11
@@ -91,5 +92,7 @@ public:
 
 	bool isWaitingOutputMPlane() const { return waitingOutputMPlane; }
 	bool isWaitingCaptureMPlane() const { return waitingCaptureMPlane; }
+
+	void WaitOnPoll();
 
 };

@@ -1,4 +1,6 @@
 
+#include <poll.h>
+
 #include "M2M.h"
 
 ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
@@ -647,5 +649,38 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 		}
 
 		return result;
+	}
+
+	void M2M::WaitOnPoll() {
+	    struct pollfd poll_events;
+	    int poll_state;
+
+	    poll_events.fd = mfc_fd;
+	    poll_events.events = POLLIN | POLLOUT | POLLERR;
+	    poll_events.revents = 0;
+
+	    do {
+	        poll_state = poll((struct pollfd*)&poll_events, 1, VIDEO_ENCODER_POLL_TIMEOUT);
+	        if (poll_state > 0) {
+	            if (poll_events.revents & (POLLIN | POLLOUT)) {
+	                static int revents_num = 0;
+	                revents_num++;
+	                if(revents_num % 100 == 0) {
+	                    fprintf(stderr, "%s: Poll revents, %d \n", __func__, revents_num);
+	                }
+	                break;
+	            } else {
+	                fprintf(stderr, "%s: Poll return error \n", __func__);
+	                break;
+	            }
+	        } else if (poll_state < 0) {
+	            fprintf(stderr, "%s: Poll state error \n", __func__);
+	            break;
+	        } else { // poll_state == 0
+	            static int timeout_num = 0;
+	            timeout_num++;
+	            fprintf(stderr, "%s: Poll state timeout, %d \n", __func__, timeout_num);
+	        }
+	    } while (poll_state == 0);
 	}
 
