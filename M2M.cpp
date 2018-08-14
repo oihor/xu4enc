@@ -3,6 +3,10 @@
 
 #include "M2M.h"
 
+#define V4L2_CID_MPEG_MFC_BASE      (V4L2_CTRL_CLASS_MPEG | 0x2000)
+#define V4L2_CID_MPEG_MFC51_VIDEO_H264_RC_FRAME_RATE    \
+                    (V4L2_CID_MPEG_MFC_BASE + 21)
+
 ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
     // get buffer
     ssize_t totalRead = 0;
@@ -83,6 +87,27 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 		}
 	}
 
+	void M2M::SetFPS(int value) {
+        v4l2_ext_control ctrl[2] = { 0 };
+
+        ctrl[0].id = V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE;
+        ctrl[0].value = 1;
+
+        ctrl[1].id = V4L2_CID_MPEG_MFC51_VIDEO_H264_RC_FRAME_RATE;
+        ctrl[1].value = fps;
+
+        v4l2_ext_controls ctrls = { 0 };
+        ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
+        ctrls.count = 2;
+        ctrls.controls = ctrl;
+
+        int io = ioctl(mfc_fd, VIDIOC_S_EXT_CTRLS, &ctrls);
+        if (io != 0)
+        {
+            throw Exception("VIDIOC_S_EXT_CTRLS failed.");
+        }
+	}
+
 	void M2M::SetGroupOfPictures(int value)
 	{
 		v4l2_ext_control ctrl = { 0 };
@@ -143,6 +168,8 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 
 
 		SetProfile();
+
+		SetFPS(fps);
 
 		SetBitrate(bitrate);
 		
@@ -242,7 +269,7 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 		format.fmt.pix_mp.width = width;
 		format.fmt.pix_mp.height = height;
 		format.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_H264;
-		format.fmt.pix_mp.plane_fmt[0].sizeimage = width * height * 4;
+		format.fmt.pix_mp.plane_fmt[0].sizeimage = width * height * 1;
 
 		fprintf(stderr, "v4l2_format out about to set: width=%d, height=%d, pixelformat=0x%x\n",
 			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);

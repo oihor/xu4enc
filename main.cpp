@@ -108,6 +108,7 @@ int main(int argc, char** argv)
 
 	while (true /*&& (frameCount < framerate * 1)*/)
 	{
+#if 1
 		// get buffer
 		ssize_t totalRead = 0;
 		while (totalRead < bufferSize)
@@ -134,20 +135,20 @@ int main(int argc, char** argv)
 			fprintf(stderr, "read underflow. (%d of %d)\n", totalRead, bufferSize);
 			break;
 		}
-
+#endif
 
 		bool frameEncoded = false;
 		while(!frameEncoded) {
 	        // Encode the video frames
-	        while (!codec.EncodeNV12(&input[0], &input[width * height]))
+	        if (!codec.EncodeNV12(&input[0], &input[width * height]))
 	        {
 	            //fprintf(stderr, "codec.EncodeN12 failed.\n");
-	            std::this_thread::yield();
+	            //std::this_thread::yield();
 	            //std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	            //std::this_thread::sleep_for(std::chrono::milliseconds(1000 / (8 * framerate)));
-	        } //else {
+	        } else {
 	            frameEncoded = true;
-	        //}
+	        }
 
 	        while (true)
 	        {
@@ -189,11 +190,11 @@ int main(int argc, char** argv)
 //	        if(codec.isWaitingOutputMPlane() && codec.isWaitingCaptureMPlane()) {
 //	            //fprintf(stderr, "sleeping for %d ms.\n", 1000 / (8 * framerate));
 //	            //std::this_thread::sleep_for(std::chrono::milliseconds(1000 / (8 * framerate)));
-//	            std::this_thread::yield();
+	            std::this_thread::yield();
 //	            std::this_thread::sleep_for(std::chrono::milliseconds(1));
 //	        }
 
-	        codec.WaitOnPoll();
+//	        codec.WaitOnPoll();
 		}
 	}
 

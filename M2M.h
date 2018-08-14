@@ -67,6 +67,8 @@ class M2M
 
 	void SetBitrate(int value);
 
+	void SetFPS(int value);
+
 	void SetGroupOfPictures(int value);
 
 	void ApplyInputSettings();
