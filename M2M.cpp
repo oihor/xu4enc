@@ -126,20 +126,20 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 			format.fmt.pix.width, format.fmt.pix.height, format.fmt.pix.pixelformat);
 
 
-//		v4l2_streamparm streamParm = { 0 };
-//		streamParm.type = format.type;
-//		streamParm.parm.capture.timeperframe.numerator = 1;
-//		streamParm.parm.capture.timeperframe.denominator = fps;
-//
-//		io = ioctl(mfc_fd, VIDIOC_S_PARM, &streamParm);
-//		if (io < 0)
-//		{
-//			throw Exception("VIDIOC_S_PARM failed.");
-//		}
-//
-//		fprintf(stderr, "capture.timeperframe: numerator=%d, denominator=%d\n",
-//			streamParm.parm.capture.timeperframe.numerator,
-//			streamParm.parm.capture.timeperframe.denominator);
+		v4l2_streamparm streamParm = { 0 };
+		streamParm.type = format.type;
+		streamParm.parm.capture.timeperframe.numerator = 1;
+		streamParm.parm.capture.timeperframe.denominator = fps;
+
+		io = ioctl(mfc_fd, VIDIOC_S_PARM, &streamParm);
+		if (io < 0)
+		{
+			throw Exception("VIDIOC_S_PARM failed.");
+		}
+
+		fprintf(stderr, "capture.timeperframe: numerator=%d, denominator=%d\n",
+			streamParm.parm.capture.timeperframe.numerator,
+			streamParm.parm.capture.timeperframe.denominator);
 
 
 		SetProfile();
@@ -417,7 +417,7 @@ ssize_t read_file_to_buf(int fd, void *buf, size_t nbytes) {
 			throw Exception("VIDIOC_QUERYCAP failed.");
 		}
 
-		if (/*(cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) == 0 ||*/
+		if ((cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) == 0 ||
 			(cap.capabilities & V4L2_CAP_STREAMING) == 0)
 		{
 			fprintf(stderr, "V4L2_CAP_VIDEO_M2M_MPLANE=%d\n", (cap.capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) != 0);
